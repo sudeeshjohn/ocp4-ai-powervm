@@ -9,6 +9,10 @@
     - set_fact:
         ip_config: "ip=dhcp"
 
+- name: Convert MAC address to GRUB format (01-xx-xx-xx-xx-xx-xx)
+  set_fact:
+    grub_mac_format: "01-{{ mac | lower | replace(':', '-') }}"
+
 - name: create grub2 block for Assisted/Agent/SNO
   when: (install_type == "assisted") or ( install_type == "agent" ) or (install_type == "sno" and day2_workers is not defined)
   blockinfile:
@@ -27,6 +31,22 @@
       }
       fi
     dest: /var/lib/tftpboot/boot/grub2/grub.cfg
+
+- name: Create MAC-specific grub config for Assisted/Agent/SNO
+  when: (install_type == "assisted") or (install_type == "agent") or (install_type == "sno" and day2_workers is not defined)
+  copy:
+    dest: "/var/lib/tftpboot/boot/grub2/powerpc-ieee1275/grub.cfg-{{ grub_mac_format }}"
+    content: |
+      set default=0
+      set timeout=1
+
+      menuentry "CoreOS (BIOS)" {
+         echo "Loading kernel"
+         linux (tftp)/rhcos/kernel {{ ip_config }} console=tty0 console=ttyS0 console=hvc0,115200n8 rd.neednet=1 ignition.platform.id=metal ignition.firstboot {{ coreos_inst_url }} ignition.config.url={{ ignition_url }}/{{ ignition }}
+
+         echo "Loading initrd"
+         initrd (tftp)/rhcos/initramfs.img
+      }
 
 - name: create grub2 block for normal OCP
   when: (install_type == "normal") or  (install_type == "sno" and day2_workers is defined and day2_workers|length > 0)
@@ -48,6 +68,21 @@
         }
         fi
       dest: /var/lib/tftpboot/boot/grub2/grub.cfg
+
+  - name: Create MAC-specific grub config for normal OCP
+    copy:
+      dest: "/var/lib/tftpboot/boot/grub2/powerpc-ieee1275/grub.cfg-{{ grub_mac_format }}"
+      content: |
+        set default=0
+        set timeout=1
+
+        menuentry "CoreOS (BIOS)" {
+          echo "Loading kernel for {{ name }}"
+          linux (tftp)/rhcos/kernel {{ ip_config }} console=tty0 console=ttyS0 console=hvc0,115200n8 rd.neednet=1 {{ multipath }} coreos.inst=yes coreos.inst.install_dev={{ mdisk }} {{ coreos_inst_url }} coreos.inst.ignition_url={{ ignition_url }}/{{ ignition }} ignition.config.url={{ ignition_url }}/first-boot-ppc64le-{{ name }}.ign
+
+          echo "Loading initrd"
+          initrd (tftp)/rhcos/initramfs.img
+        }
 
   - name: Copy first-boot-ppc64le-{{ name }}.ign to /www/html/ignition
     #when: install_type == "normal" or (day2_workers is defined and day2_workers|length > 0)
